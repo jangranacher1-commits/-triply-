@@ -14,7 +14,13 @@ This structure is designed so real APIs can be plugged in later.
 
 from flask import Flask, request, render_template_string
 import random
+import os
 
+try:
+    import anthropic
+except ImportError:
+    anthropic = None
+    
 # ---------------------------------------------------
 # Flask App Initialization
 # ---------------------------------------------------
@@ -344,20 +350,57 @@ def rides_html():
 # ===================================================
 def recommendations_html(destination, preferences):
     """
-    Generates local travel ideas.
+    Generates local travel ideas using Claude.
     """
 
-    ideas = [
-        "Hidden taco stand",
-        "Local jazz bar",
-        "Street art district",
-        "Family-owned cafe",
-        "Budget museum pass",
-        "Sunset viewpoint",
-        "Walking food tour"
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+
+    fallback_ideas = [
+        "Ask a barista where locals actually eat nearby",
+        "Look for a family-owned cafe away from the main tourist street",
+        "Visit a neighborhood market instead of a chain shopping area",
+        "Find a small live music venue or community arts space",
+        "Take a walk through a residential neighborhood with local shops"
     ]
 
-    random.shuffle(ideas)
+    if anthropic is not None and api_key:
+        try:
+            client = anthropic.Anthropic(api_key=api_key)
+
+            prompt = f"""
+You are Triply, a tasteful local travel recommendation assistant.
+
+Give 5 specific, locally flavored recommendations for a traveler going to:
+Destination: {destination}
+
+Their interests are:
+{preferences}
+
+Avoid generic tourist advice. Suggest ideas that feel local, authentic, affordable, and culturally specific.
+Return only a simple HTML unordered list with 5 <li> items.
+Do not invent exact business names unless you are confident they are real.
+"""
+
+            message = client.messages.create(
+                model="claude-3-5-haiku-latest",
+                max_tokens=500,
+                temperature=0.8,
+                system="You create concise, tasteful, locally grounded travel recommendations for Triply.",
+                messages=[{"role": "user", "content": prompt}],
+            )
+
+            ideas_html = message.content[0].text
+
+            return f"""
+            <div class="card">
+                <h2>Local Recommendations for {destination}</h2>
+                <p>Based on your interests: {preferences}</p>
+                {ideas_html}
+            </div>
+            """
+
+        except Exception as e:
+            print("Claude recommendations failed:", e)
 
     html = f"""
     <div class="card">
@@ -366,13 +409,12 @@ def recommendations_html(destination, preferences):
         <ul>
     """
 
-    for item in ideas[:5]:
+    for item in fallback_ideas:
         html += f"<li>{item}</li>"
 
     html += "</ul></div>"
 
     return html
-
 
 # ===================================================
 # RUN APP
